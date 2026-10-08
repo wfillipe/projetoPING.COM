@@ -993,15 +993,12 @@ Essas funcionalidades não fazem parte do MVP atual.
 
 ------------------------------------------------------------------------
 
-# Equipe
+## Equipe
+- **Wilson Filipe** - 20251380021 | [GitHub](https://github.com/wfillipe) | [LinkedIn](https://linkedin.com/in/fillipe-lima)
+- **Samuel Menezes** - 20251380002 | [GitHub](https://github.com/SamuelMenezes20252) | [LinkedIn](https://linkedin.com/in/samuel-menezes-a2a09826b)
+- **Kalel Aleksander** - 20251380030 | [GitHub](https://github.com/usuario3) | [LinkedIn](https://linkedin.com/in/usuario3)
 
--   **Wilson Filipe** --- 20251380021
--   **Samuel Menezes** --- 20251380002
--   **Kalel Aleksander** --- 20251380030
 
-Os links individuais de GitHub, LinkedIn, apresentação e protótipos
-podem ser adicionados posteriormente caso sejam definidos para a
-entrega.
 
 ------------------------------------------------------------------------
 
