@@ -3,42 +3,274 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Teste de Velocidade</title>
+    <meta name="theme-color" content="#101827">
+    <title>PING.COM | Monitoramento de redes</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <main class="speedtest">
-        <section class="hero">
-            <p class="eyebrow">VELOCIDADE DA REDE</p>
-            <h1>Qual é a velocidade da sua internet?</h1>
-            <p class="subtitle">
-                Versão inicial do site PING.COM.
-            </p>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <a class="brand" href="/" aria-label="PING.COM início">
+                <span class="brand-mark">P</span>
+                <span>PING<span class="brand-dot">.</span>COM</span>
+            </a>
 
-            <div class="speed-display">
-                <span class="speed-value">00.00</span>
-                <span class="speed-unit">Mbps</span>
-            </div>
+            <p class="sidebar-label">MONITORAMENTO</p>
+            <nav class="side-nav" aria-label="Navegação principal">
+                <button class="nav-button is-active" data-view="dashboard" type="button">
+                    <span aria-hidden="true">◉</span> Dashboard
+                </button>
+                <button class="nav-button" data-view="devices" type="button">
+                    <span aria-hidden="true">▦</span> Dispositivos
+                </button>
+                <button class="nav-button" data-view="problems" type="button">
+                    <span aria-hidden="true">⚠</span> Problemas
+                </button>
+                <button class="nav-button" data-view="history" type="button">
+                    <span aria-hidden="true">▤</span> Histórico
+                </button>
+            </nav>
 
-            <button class="start-button">INICIAR TESTE</button>
-        </section>
+            <section class="account-panel" aria-labelledby="account-title">
+                <p class="sidebar-label" id="account-title">SUA CONTA</p>
+                <div id="account-logged-out">
+                    <p class="account-hint">Entre para acompanhar seus dispositivos.</p>
+                    <form id="login-form" class="auth-form">
+                        <label for="login-email">E-mail</label>
+                        <input id="login-email" name="email" type="email" autocomplete="email" required>
+                        <label for="login-password">Senha</label>
+                        <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+                        <button class="button button-primary button-full" type="submit">Entrar</button>
+                    </form>
+                    <form id="register-form" class="auth-form" hidden>
+                        <label for="register-name">Nome</label>
+                        <input id="register-name" name="name" type="text" autocomplete="name" minlength="2" maxlength="80" required>
+                        <label for="register-email">E-mail</label>
+                        <input id="register-email" name="email" type="email" autocomplete="email" required>
+                        <label for="register-password">Senha (mínimo 8 caracteres)</label>
+                        <input id="register-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+                        <button class="button button-primary button-full" type="submit">Criar conta</button>
+                    </form>
+                    <button id="auth-toggle" class="text-button" type="button">Criar uma conta</button>
+                </div>
+                <div id="account-logged-in" hidden>
+                    <p class="account-name" id="account-name"></p>
+                    <p class="account-email" id="account-email"></p>
+                    <button id="logout-button" class="text-button" type="button">Sair da conta</button>
+                </div>
+                <p id="auth-message" class="form-message" role="status" aria-live="polite"></p>
+            </section>
 
-        <section class="stats">
-            <div class="stat-card">
-                <span class="stat-label">PING</span>
-                <strong>-- ms</strong>
-            </div>
+            <p class="sidebar-footnote">Ping ICMP a cada 60 segundos.</p>
+        </aside>
 
-            <div class="stat-card">
-                <span class="stat-label">DOWNLOAD</span>
-                <strong>-- Mbps</strong>
-            </div>
+        <main class="main-content">
+            <header class="page-header">
+                <div>
+                    <p class="eyebrow">CENTRAL DE OPERAÇÕES</p>
+                    <h1 id="page-title">Dashboard</h1>
+                </div>
+                <span class="connection-badge"><span class="status-dot"></span> Verificação automática</span>
+            </header>
 
-            <div class="stat-card">
-                <span class="stat-label">UPLOAD</span>
-                <strong>-- Mbps</strong>
-            </div>
-        </section>
-    </main>
+            <section id="dashboard-view" class="view-section">
+                <div class="welcome-row">
+                    <div>
+                        <p class="eyebrow">RESUMO DA REDE</p>
+                        <h2>Disponibilidade dos dispositivos</h2>
+                    </div>
+                    <p class="last-check">Última verificação: <strong id="dashboard-last-check">Aguardando dados</strong></p>
+                </div>
+
+                <section class="stats" aria-label="Resumo dos dispositivos">
+                    <article class="stat-card online-card">
+                        <span class="stat-label">ONLINE</span>
+                        <strong id="online-count">0</strong>
+                        <span class="stat-detail">Inclui dispositivos com latência elevada</span>
+                    </article>
+                    <article class="stat-card offline-card">
+                        <span class="stat-label">OFFLINE</span>
+                        <strong id="offline-count">0</strong>
+                        <span class="stat-detail">Sem resposta aos três pacotes ICMP</span>
+                    </article>
+                    <article class="stat-card latency-card">
+                        <span class="stat-label">LATÊNCIA ELEVADA</span>
+                        <strong id="latency-count">0</strong>
+                        <span class="stat-detail">Média igual ou superior a 100 ms</span>
+                    </article>
+                </section>
+
+                <section class="panel problems-panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">ATENÇÃO</p>
+                            <h2>Problemas atuais</h2>
+                        </div>
+                        <button class="text-button" data-view="problems" type="button">Ver todos</button>
+                    </div>
+                    <ul id="dashboard-problems" class="problem-list"></ul>
+                    <p id="dashboard-problems-empty" class="empty-state" hidden>Nenhum problema atual. Seus dispositivos estão respondendo normalmente.</p>
+                </section>
+
+                <section class="panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">REDE MONITORADA</p>
+                            <h2>Dispositivos</h2>
+                        </div>
+                        <button class="text-button" data-view="devices" type="button">Gerenciar dispositivos</button>
+                    </div>
+                    <div id="dashboard-devices" class="device-grid"></div>
+                    <p id="dashboard-devices-empty" class="empty-state">Cadastre um dispositivo para iniciar o monitoramento.</p>
+                </section>
+            </section>
+
+            <section id="devices-view" class="view-section" hidden>
+                <section class="panel add-device-panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">NOVO ALVO</p>
+                            <h2>Cadastrar dispositivo</h2>
+                        </div>
+                    </div>
+                    <form id="device-form" class="device-form">
+                        <label>
+                            Nome
+                            <input name="name" type="text" maxlength="80" placeholder="Ex.: Router-01" required>
+                        </label>
+                        <label>
+                            Endereço IPv4 privado
+                            <input name="ip" type="text" inputmode="decimal" placeholder="192.168.1.1" required>
+                        </label>
+                        <label>
+                            Tipo
+                            <select name="type" required>
+                                <option value="computador">Computador</option>
+                                <option value="servidor">Servidor</option>
+                                <option value="roteador">Roteador</option>
+                                <option value="switch">Switch</option>
+                                <option value="outro">Outro</option>
+                            </select>
+                        </label>
+                        <button class="button button-primary" type="submit">Adicionar dispositivo</button>
+                    </form>
+                    <p class="form-hint">Aceita endereços privados IPv4 (10.x, 172.16–31.x, 192.168.x) e localhost (127.x). O servidor precisa alcançar essa rede.</p>
+                    <p id="device-form-message" class="form-message" role="status" aria-live="polite"></p>
+                </section>
+
+                <section class="panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">INVENTÁRIO</p>
+                            <h2>Seus dispositivos</h2>
+                        </div>
+                        <span id="device-count" class="history-count">0 dispositivos</span>
+                    </div>
+                    <div id="device-list" class="device-grid"></div>
+                    <p id="devices-empty" class="empty-state">Nenhum dispositivo cadastrado ainda.</p>
+                </section>
+            </section>
+
+            <section id="problems-view" class="view-section" hidden>
+                <section class="panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">STATUS ATUAL</p>
+                            <h2>Problemas que precisam de atenção</h2>
+                        </div>
+                    </div>
+                    <ul id="problems-list" class="problem-list problem-list-large"></ul>
+                    <p id="problems-empty" class="empty-state">Nenhum problema atual. Seus dispositivos estão respondendo normalmente.</p>
+                </section>
+            </section>
+
+            <section id="history-view" class="view-section" hidden>
+                <section class="panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">VERIFICAÇÕES ICMP</p>
+                            <h2>Histórico de monitoramento</h2>
+                        </div>
+                        <span id="history-count" class="history-count">0 registros</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Dispositivo</th>
+                                    <th>Endereço IP</th>
+                                    <th>Data e hora</th>
+                                    <th>Latência média</th>
+                                    <th>Perda</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-rows"></tbody>
+                        </table>
+                    </div>
+                    <p id="history-empty" class="empty-state">Nenhuma verificação registrada ainda.</p>
+                </section>
+            </section>
+
+            <section id="device-detail-view" class="view-section" hidden>
+                <button id="back-to-devices" class="text-button back-button" type="button">← Voltar aos dispositivos</button>
+                <section class="panel device-detail-panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">DETALHES DO DISPOSITIVO</p>
+                            <h2 id="detail-name">Dispositivo</h2>
+                        </div>
+                        <div class="detail-actions">
+                            <button id="check-now-button" class="button button-secondary" type="button">Verificar agora</button>
+                            <button id="delete-device-button" class="button button-danger" type="button">Excluir</button>
+                        </div>
+                    </div>
+                    <div class="detail-facts">
+                        <div><span>Endereço IP</span><strong id="detail-ip">—</strong></div>
+                        <div><span>Tipo</span><strong id="detail-type">—</strong></div>
+                        <div><span>Status</span><strong id="detail-status">Aguardando</strong></div>
+                        <div><span>Latência média</span><strong id="detail-latency">—</strong></div>
+                        <div><span>Perda de pacotes</span><strong id="detail-loss">—</strong></div>
+                        <div><span>Última verificação</span><strong id="detail-last-check">—</strong></div>
+                    </div>
+                    <p id="detail-message" class="form-message" role="status" aria-live="polite"></p>
+                </section>
+                <section class="panel chart-panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">TENDÊNCIA</p>
+                            <h2>Latência recente</h2>
+                        </div>
+                    </div>
+                    <div id="latency-chart-wrap" class="chart-wrap">
+                        <svg id="latency-chart" role="img" aria-label="Gráfico de latência em milissegundos"></svg>
+                    </div>
+                    <p id="chart-empty" class="empty-state">Ainda não há latências suficientes para exibir o gráfico.</p>
+                </section>
+                <section class="panel">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">REGISTROS</p>
+                            <h2>Verificações recentes</h2>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Data e hora</th><th>Latência média</th><th>Perda</th><th>Status</th></tr>
+                            </thead>
+                            <tbody id="detail-history-rows"></tbody>
+                        </table>
+                    </div>
+                    <p id="detail-history-empty" class="empty-state">Nenhuma verificação registrada.</p>
+                </section>
+            </section>
+
+            <footer class="page-footer">
+                O ping ICMP é executado pelo servidor. A resposta depende de o dispositivo permitir ICMP e estar acessível a partir dessa máquina.
+            </footer>
+        </main>
+    </div>
+    <script src="script.js"></script>
 </body>
 </html>

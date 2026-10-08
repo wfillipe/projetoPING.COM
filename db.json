@@ -1,0 +1,38 @@
+{
+  "usuarios": [
+    {
+      "id": "96ac036d-b9c3-46b5-8707-dd1606bcaeac",
+      "name": "samuel",
+      "email": "samuel.menezes@academico.ifpb.edu.br",
+      "salt": "0b2c15ff371cbe61dfc2ec59c352149a",
+      "passwordHash": "e21e7bdb9617adcacfd1f35e70fe4e7bce494d8e95e3a61b68727695ebf486f7eb239ce405fbf855c84a7c4d3481a5ad77c2d88f02128f19abb826dd0a8ed995",
+      "createdAt": "2026-10-04T19:51:48.185Z"
+    }
+  ],
+  "testes": [],
+  "dispositivos": [],
+  "verificacoes": [
+    {
+      "id": "f9b25527-33c2-4e80-bb2e-72cfab2cfeff",
+      "userId": "96ac036d-b9c3-46b5-8707-dd1606bcaeac",
+      "deviceId": "71fd5526-322a-472b-b655-61e4b8b8ec89",
+      "deviceName": "moto-g84",
+      "ip": "10.2.11.8",
+      "checkedAt": "2026-10-04T20:56:24.770Z",
+      "status": "high_latency",
+      "latencyMs": 168,
+      "packetLossPercent": 0
+    },
+    {
+      "id": "d01b056f-4cbb-412e-97cc-8cf04b9fc99b",
+      "userId": "96ac036d-b9c3-46b5-8707-dd1606bcaeac",
+      "deviceId": "71fd5526-322a-472b-b655-61e4b8b8ec89",
+      "deviceName": "moto-g84",
+      "ip": "10.2.11.8",
+      "checkedAt": "2026-10-04T20:56:37.375Z",
+      "status": "high_latency",
+      "latencyMs": 170.33,
+      "packetLossPercent": 0
+    }
+  ]
+}
