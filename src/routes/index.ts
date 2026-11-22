@@ -4,9 +4,7 @@ import { DeviceController } from "../controllers/DeviceController";
 import { DashboardController } from "../controllers/DashboardController";
 import { auth } from "../middleware/auth";
 import { asyncHandler } from "../utils/errors";
-
 const router = Router();
-
 router.post("/auth/register", asyncHandler(AuthController.register));
 router.post("/auth/login", asyncHandler(AuthController.login));
 router.use(auth);
@@ -21,5 +19,4 @@ router.delete("/devices/:id", asyncHandler(DeviceController.remove));
 router.get("/dashboard", asyncHandler(DashboardController.dashboard));
 router.get("/problems", asyncHandler(DashboardController.problems));
 router.get("/history", asyncHandler(DashboardController.history));
-
 export default router;
