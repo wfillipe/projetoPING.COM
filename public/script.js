@@ -1,4 +1,22 @@
-const api = async (path, options = {}) => {
+// Token JWT guardado na aba (sessionStorage), enviado no header Authorization.
+let authToken = sessionStorage.getItem("pingcom_token");
+
+const $ = (id) => document.getElementById(id);
+
+function saveSession(response) {
+    if (!response || typeof response.token !== "string") throw new Error("Resposta de login inválida.");
+    authToken = response.token;
+    sessionStorage.setItem("pingcom_token", authToken);
+    const { token, ...user } = response;
+    return user;
+}
+
+function clearToken() {
+    authToken = null;
+    sessionStorage.removeItem("pingcom_token");
+}
+
+async function api(path, options = {}) {
     let response;
     try {
         response = await fetch(path, {
@@ -6,20 +24,30 @@ const api = async (path, options = {}) => {
             cache: "no-store",
             ...options,
             headers: {
-                ...(options.body instanceof Uint8Array ? {} : { "Content-Type": "application/json" }),
+                "Content-Type": "application/json",
+                ...(authToken && { Authorization: `Bearer ${authToken}` }),
                 ...options.headers
             }
         });
     } catch {
-        throw new Error("Não foi possível conectar ao servidor. Execute `npm start` na pasta do projeto e abra http://localhost:3000.");
+        throw new Error("Não foi possível conectar ao servidor. Execute `npm run dev` na pasta do projeto e abra http://localhost:3000.");
     }
 
     if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        // Sessão inválida: limpa o token e volta para a tela de login
+        if (response.status === 401 && !path.endsWith("/auth/login")) {
+            clearToken();
+            if (!path.endsWith("/auth/session")) {
+                $("auth-message").textContent = "Sua sessão expirou. Entre novamente.";
+                $("account-logged-out").hidden = false;
+                $("account-logged-in").hidden = true;
+            }
+        }
         throw new Error(body.error || `Erro do servidor (${response.status}).`);
     }
     return response.status === 204 ? null : response.json();
-};
+}
 
 const deviceTypeLabels = {
     computador: "Computador",
@@ -33,154 +61,260 @@ const statusLabels = {
     online: "Online",
     high_latency: "Latência elevada",
     offline: "Offline",
-    error: "Erro de monitoramento"
+    error: "Erro de monitoramento",
+    pending: "Aguardando ping"
 };
 
-const formatDate = (value) => value
-    ? new Date(value).toLocaleString("pt-BR")
-    : "Ainda não verificado";
+const viewTitles = {
+    dashboard: "Dashboard",
+    devices: "Dispositivos",
+    problems: "Problemas",
+    history: "Histórico",
+    deviceDetail: "Detalhes do dispositivo"
+};
 
-const formatLatency = (value) => value === null || value === undefined
-    ? "—"
-    : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} ms`;
+// Funções de formatação: nunca mostram undefined/NaN
+const toNumber = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+};
+
+const formatDate = (value) => {
+    if (!value) return "Ainda não verificado";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("pt-BR");
+};
+
+const formatLatency = (value) => {
+    const number = toNumber(value);
+    return number === null ? "—" : `${number.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} ms`;
+};
+
+const formatLoss = (value) => {
+    const number = toNumber(value);
+    return number === null || number < 0 || number > 100
+        ? "—"
+        : `${number.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+};
+
+// Aceita camelCase (padrão do back-end) e snake_case (registros antigos)
+function normalizeCheck(check) {
+    if (!check) return null;
+    const latencyMs = toNumber(check.latencyMs ?? check.latency_ms);
+    let status = check.status;
+    if (!["online", "high_latency", "offline", "error"].includes(status)) status = "pending";
+    // Sem medição de latência não dá para afirmar latência elevada
+    if (status === "high_latency" && latencyMs === null) status = "pending";
+    return {
+        ...check,
+        deviceName: check.deviceName ?? check.device_name ?? "Dispositivo",
+        checkedAt: check.checkedAt ?? check.checked_at ?? null,
+        packetLossPercent: toNumber(check.packetLossPercent ?? check.packet_loss_percent),
+        latencyMs,
+        status
+    };
+}
+
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+
+function showMessage(target, message, isError = false) {
+    target.textContent = message;
+    target.classList.toggle("is-error", isError);
+    target.classList.toggle("is-success", Boolean(message) && !isError);
+}
+
+function statusBadge(status) {
+    const key = statusLabels[status] ? status : "pending";
+    return el("span", `status-badge status-${key}`, statusLabels[key]);
+}
+
+function deviceDescription(device) {
+    const check = normalizeCheck(device.lastCheck);
+    if (!check) return "Aguardando primeira verificação.";
+    if (check.status === "offline") return "Sem resposta aos pacotes ICMP.";
+    if (check.status === "error") return check.message || "Não foi possível executar o ping.";
+    const loss = check.packetLossPercent > 0 ? ` · perda ${formatLoss(check.packetLossPercent)}` : "";
+    return `${formatLatency(check.latencyMs)}${loss} · ${formatDate(check.checkedAt)}`;
+}
+
+function createDeviceCard(device) {
+    const card = el("button", "device-card");
+    card.type = "button";
+    card.dataset.deviceId = device.id;
+
+    const top = el("span", "device-card-top");
+    top.append(
+        el("strong", "device-card-name", device.name),
+        statusBadge(normalizeCheck(device.lastCheck)?.status)
+    );
+    card.append(
+        top,
+        el("span", "device-card-address", device.ip),
+        el("span", "device-card-type", deviceTypeLabels[device.type] || "Outro"),
+        el("span", "device-card-detail", deviceDescription(device))
+    );
+    return card;
+}
+
+function problemDescription(check) {
+    const when = formatDate(check.checkedAt);
+    if (check.status === "offline") {
+        return `Não responde ao ping · perda ${formatLoss(check.packetLossPercent)} · ${when}`;
+    }
+    if (check.status === "high_latency") {
+        return `Latência elevada: ${formatLatency(check.latencyMs)} · ${when}`;
+    }
+    return `${check.message || "Erro ao executar o comando ping."} · ${when}`;
+}
+
+function createProblemItem(device) {
+    const check = normalizeCheck(device.lastCheck);
+    const symbols = { offline: "!", high_latency: "↗" };
+
+    const content = el("span", "problem-content");
+    content.append(
+        el("strong", "problem-name", device.name),
+        el("span", "problem-description", problemDescription(check))
+    );
+    const open = el("button", "problem-open", "Detalhes →");
+    open.type = "button";
+    open.dataset.deviceId = device.id;
+
+    const item = el("li", "problem-item");
+    item.append(el("span", `problem-icon status-${check.status}`, symbols[check.status] || "⚠"), content, open);
+    return item;
+}
+
+// Preenche uma lista e mostra/esconde a mensagem de "vazio"
+function fillList(listId, emptyId, items, createItem) {
+    $(listId).replaceChildren(...items.map(createItem));
+    $(emptyId).hidden = items.length > 0;
+}
+
+function renderDashboard({ summary, devices, problems }) {
+    $("online-count").textContent = summary.online;
+    $("offline-count").textContent = summary.offline;
+    $("latency-count").textContent = summary.highLatency;
+    $("dashboard-last-check").textContent = formatDate(summary.lastCheckAt);
+    $("device-count").textContent = `${devices.length} ${devices.length === 1 ? "dispositivo" : "dispositivos"}`;
+
+    fillList("dashboard-devices", "dashboard-devices-empty", devices.slice(0, 6), createDeviceCard);
+    fillList("device-list", "devices-empty", devices, createDeviceCard);
+    fillList("dashboard-problems", "dashboard-problems-empty", problems, createProblemItem);
+    fillList("problems-list", "problems-empty", problems, createProblemItem);
+}
+
+// No detalhe do dispositivo a tabela tem 4 colunas; no histórico geral, 6.
+function renderHistory(checks, rowsId, emptyId) {
+    const isDetail = rowsId === "detail-history-rows";
+    const rows = checks.map(normalizeCheck).filter(Boolean).map((check) => {
+        const values = [
+            formatDate(check.checkedAt),
+            formatLatency(check.latencyMs),
+            formatLoss(check.packetLossPercent)
+        ];
+        if (!isDetail) values.unshift(check.deviceName, check.ip || "—");
+
+        const row = el("tr");
+        values.forEach((value, index) => row.append(el("td", !isDetail && index === 0 ? "history-device" : "", value)));
+        const statusCell = el("td");
+        statusCell.append(statusBadge(check.status));
+        row.append(statusCell);
+        return row;
+    });
+
+    $(rowsId).replaceChildren(...rows);
+    $(emptyId).hidden = checks.length > 0;
+    return checks.length;
+}
+
+function svgElement(svg, tag, attributes, text) {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, String(value)));
+    if (text !== undefined) node.textContent = text;
+    svg.append(node);
+    return node;
+}
+
+function renderLatencyChart(checks) {
+    const svg = $("latency-chart");
+    svg.replaceChildren();
+
+    const points = checks
+        .map(normalizeCheck)
+        .filter((check) => check && check.checkedAt && check.latencyMs !== null && check.latencyMs >= 0)
+        .slice(0, 20)
+        .reverse();
+
+    $("latency-chart-wrap").hidden = points.length === 0;
+    $("chart-empty").hidden = points.length > 0;
+    if (!points.length) return;
+
+    const width = 640, height = 220;
+    const left = 42, right = 16, top = 18, bottom = 36;
+    const max = Math.max(100, ...points.map((point) => point.latencyMs));
+    const x = (index) => points.length === 1
+        ? (left + width - right) / 2
+        : left + (index * (width - left - right)) / (points.length - 1);
+    const y = (value) => height - bottom - (value / max) * (height - top - bottom);
+
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+
+    // Linha de referência em 100 ms e eixo base
+    svgElement(svg, "line", { x1: left, y1: y(100), x2: width - right, y2: y(100), class: "chart-threshold" });
+    svgElement(svg, "text", { x: left, y: y(100) - 6, class: "chart-label" }, "100 ms");
+    svgElement(svg, "line", { x1: left, y1: height - bottom, x2: width - right, y2: height - bottom, class: "chart-axis" });
+
+    svgElement(svg, "polyline", {
+        points: points.map((point, index) => `${x(index)},${y(point.latencyMs)}`).join(" "),
+        class: "chart-line"
+    });
+
+    points.forEach((point, index) => {
+        const circle = svgElement(svg, "circle", {
+            cx: x(index),
+            cy: y(point.latencyMs),
+            r: 4,
+            class: point.latencyMs >= 100 ? "chart-point chart-point-high" : "chart-point"
+        });
+        svgElement(circle, "title", {}, `${formatDate(point.checkedAt)} — ${formatLatency(point.latencyMs)}`);
+    });
+
+    svgElement(svg, "text", { x: left, y: height - 8, class: "chart-label" }, "Mais antigo");
+    svgElement(svg, "text", { x: width - right, y: height - 8, "text-anchor": "end", class: "chart-label" }, "Mais recente");
+}
 
 document.addEventListener("DOMContentLoaded", () => {
-    const authMessage = document.getElementById("auth-message");
-    const accountLoggedOut = document.getElementById("account-logged-out");
-    const accountLoggedIn = document.getElementById("account-logged-in");
-    const loginForm = document.getElementById("login-form");
-    const registerForm = document.getElementById("register-form");
-    const authToggle = document.getElementById("auth-toggle");
-    const deviceForm = document.getElementById("device-form");
-    const deviceFormMessage = document.getElementById("device-form-message");
-    const viewElements = {
-        dashboard: document.getElementById("dashboard-view"),
-        devices: document.getElementById("devices-view"),
-        problems: document.getElementById("problems-view"),
-        history: document.getElementById("history-view"),
-        deviceDetail: document.getElementById("device-detail-view")
+    const authMessage = $("auth-message");
+    const loginForm = $("login-form");
+    const registerForm = $("register-form");
+    const deviceForm = $("device-form");
+    const deviceFormMessage = $("device-form-message");
+    const detailMessage = $("detail-message");
+    const views = {
+        dashboard: $("dashboard-view"),
+        devices: $("devices-view"),
+        problems: $("problems-view"),
+        history: $("history-view"),
+        deviceDetail: $("device-detail-view")
     };
 
     let currentUser = null;
-    let isRegistering = false;
     let currentView = "dashboard";
     let selectedDeviceId = null;
-
-    function showMessage(element, message, isError = false) {
-        element.textContent = message;
-        element.classList.toggle("is-error", isError);
-        element.classList.toggle("is-success", Boolean(message) && !isError);
-    }
-
-    function element(tagName, className, text) {
-        const node = document.createElement(tagName);
-        if (className) node.className = className;
-        if (text !== undefined) node.textContent = text;
-        return node;
-    }
-
-    function statusBadge(status) {
-        return element("span", `status-badge status-${status || "pending"}`, statusLabels[status] || "Aguardando ping");
-    }
-
-    function deviceDescription(device) {
-        const check = device.lastCheck;
-        if (!check) return "Aguardando primeira verificação.";
-        if (check.status === "offline") return "Sem resposta aos pacotes ICMP.";
-        if (check.status === "error") return check.message || "Não foi possível executar o ping.";
-        const loss = check.packetLossPercent > 0 ? ` · perda ${check.packetLossPercent}%` : "";
-        return `${formatLatency(check.latencyMs)}${loss} · ${formatDate(check.checkedAt)}`;
-    }
-
-    function createDeviceCard(device) {
-        const card = element("button", "device-card");
-        card.type = "button";
-        card.dataset.deviceId = device.id;
-        const top = element("span", "device-card-top");
-        const title = element("strong", "device-card-name", device.name);
-        top.append(title, statusBadge(device.lastCheck?.status));
-        const address = element("span", "device-card-address", device.ip);
-        const kind = element("span", "device-card-type", deviceTypeLabels[device.type] || "Outro");
-        const detail = element("span", "device-card-detail", deviceDescription(device));
-        card.append(top, address, kind, detail);
-        return card;
-    }
-
-    function createProblemItem(device) {
-        const check = device.lastCheck;
-        const item = element("li", "problem-item");
-        const icon = element("span", `problem-icon status-${check.status}`, check.status === "offline" ? "!" : check.status === "high_latency" ? "↗" : "⚠");
-        const content = element("span", "problem-content");
-        const name = element("strong", "problem-name", device.name);
-        const description = check.status === "offline"
-            ? `Não responde ao ping · perda ${check.packetLossPercent}% · ${formatDate(check.checkedAt)}`
-            : check.status === "high_latency"
-                ? `Latência elevada: ${formatLatency(check.latencyMs)} · ${formatDate(check.checkedAt)}`
-                : `${check.message || "Erro ao executar o comando ping."} · ${formatDate(check.checkedAt)}`;
-        content.append(name, element("span", "problem-description", description));
-        const open = element("button", "problem-open", "Detalhes →");
-        open.type = "button";
-        open.dataset.deviceId = device.id;
-        item.append(icon, content, open);
-        return item;
-    }
-
-    function renderDeviceCards(devices, targetId, emptyId) {
-        const target = document.getElementById(targetId);
-        target.replaceChildren(...devices.map(createDeviceCard));
-        document.getElementById(emptyId).hidden = devices.length > 0;
-    }
-
-    function renderProblems(problems, listId, emptyId) {
-        const target = document.getElementById(listId);
-        target.replaceChildren(...problems.map(createProblemItem));
-        document.getElementById(emptyId).hidden = problems.length > 0;
-    }
-
-    function renderDashboard(data) {
-        const { summary, devices, problems } = data;
-        document.getElementById("online-count").textContent = summary.online;
-        document.getElementById("offline-count").textContent = summary.offline;
-        document.getElementById("latency-count").textContent = summary.highLatency;
-        document.getElementById("dashboard-last-check").textContent = formatDate(summary.lastCheckAt);
-        renderDeviceCards(devices.slice(0, 6), "dashboard-devices", "dashboard-devices-empty");
-        renderDeviceCards(devices, "device-list", "devices-empty");
-        renderProblems(problems, "dashboard-problems", "dashboard-problems-empty");
-        renderProblems(problems, "problems-list", "problems-empty");
-        document.getElementById("device-count").textContent =
-            `${devices.length} ${devices.length === 1 ? "dispositivo" : "dispositivos"}`;
-    }
-
-    function renderHistory(checks, rowsId, emptyId) {
-        const rows = document.getElementById(rowsId);
-        rows.replaceChildren();
-        checks.forEach((check) => {
-            const row = document.createElement("tr");
-            const values = [
-                check.deviceName,
-                check.ip,
-                formatDate(check.checkedAt),
-                formatLatency(check.latencyMs),
-                check.packetLossPercent === null ? "—" : `${check.packetLossPercent}%`
-            ];
-            values.forEach((value, index) => {
-                const cell = element("td", index === 0 ? "history-device" : "", value);
-                row.append(cell);
-            });
-            const statusCell = element("td");
-            statusCell.append(statusBadge(check.status));
-            row.append(statusCell);
-            rows.append(row);
-        });
-        document.getElementById(emptyId).hidden = checks.length > 0;
-        return checks.length;
-    }
+    let isRegistering = false;
 
     async function loadDashboard() {
         if (!currentUser) return;
         try {
-            const data = await api("/api/dashboard");
-            renderDashboard(data);
+            renderDashboard(await api("/api/dashboard"));
         } catch (error) {
             showMessage(authMessage, error.message, true);
         }
@@ -189,117 +323,51 @@ document.addEventListener("DOMContentLoaded", () => {
     async function loadHistory() {
         if (!currentUser) return;
         try {
-            const checks = await api("/api/history");
-            const count = renderHistory(checks, "history-rows", "history-empty");
-            document.getElementById("history-count").textContent =
-                `${count} ${count === 1 ? "registro" : "registros"}`;
+            const count = renderHistory(await api("/api/history"), "history-rows", "history-empty");
+            $("history-count").textContent = `${count} ${count === 1 ? "registro" : "registros"}`;
         } catch (error) {
             showMessage(authMessage, error.message, true);
         }
     }
 
-    function addSvgElement(svg, tagName, attributes, text) {
-        const node = document.createElementNS("http://www.w3.org/2000/svg", tagName);
-        Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, String(value)));
-        if (text !== undefined) node.textContent = text;
-        svg.append(node);
-        return node;
-    }
-
-    function renderLatencyChart(checks) {
-        const svg = document.getElementById("latency-chart");
-        svg.replaceChildren();
-        const points = checks
-            .filter((check) => Number.isFinite(check.latencyMs))
-            .slice(0, 20)
-            .reverse();
-        const hasPoints = points.length > 0;
-        document.getElementById("latency-chart-wrap").hidden = !hasPoints;
-        document.getElementById("chart-empty").hidden = hasPoints;
-        if (!hasPoints) return;
-
-        const width = 640;
-        const height = 220;
-        const left = 42;
-        const right = 16;
-        const top = 18;
-        const bottom = 36;
-        const max = Math.max(100, ...points.map((point) => point.latencyMs));
-        const x = (index) => points.length === 1
-            ? (left + width - right) / 2
-            : left + (index * (width - left - right)) / (points.length - 1);
-        const y = (value) => height - bottom - (value / max) * (height - top - bottom);
-
-        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-        svg.setAttribute("preserveAspectRatio", "none");
-        addSvgElement(svg, "line", { x1: left, y1: y(100), x2: width - right, y2: y(100), class: "chart-threshold" });
-        addSvgElement(svg, "text", { x: left, y: y(100) - 6, class: "chart-label" }, "100 ms");
-        addSvgElement(svg, "line", { x1: left, y1: height - bottom, x2: width - right, y2: height - bottom, class: "chart-axis" });
-        const polylinePoints = points.map((point, index) => `${x(index)},${y(point.latencyMs)}`).join(" ");
-        addSvgElement(svg, "polyline", { points: polylinePoints, class: "chart-line" });
-        points.forEach((point, index) => {
-            const circle = addSvgElement(svg, "circle", {
-                cx: x(index),
-                cy: y(point.latencyMs),
-                r: 4,
-                class: point.latencyMs >= 100 ? "chart-point chart-point-high" : "chart-point"
-            });
-            circle.append(
-                document.createElementNS("http://www.w3.org/2000/svg", "title")
-            );
-            circle.lastChild.textContent = `${formatDate(point.checkedAt)} — ${formatLatency(point.latencyMs)}`;
-        });
-        addSvgElement(svg, "text", { x: left, y: height - 8, class: "chart-label" }, "Mais antigo");
-        addSvgElement(svg, "text", { x: width - right, y: height - 8, "text-anchor": "end", class: "chart-label" }, "Mais recente");
-    }
-
     async function loadDeviceDetail(deviceId) {
         if (!currentUser) return;
         try {
+            const id = encodeURIComponent(deviceId);
             const [device, checks] = await Promise.all([
-                api(`/api/devices/${encodeURIComponent(deviceId)}`),
-                api(`/api/history?deviceId=${encodeURIComponent(deviceId)}`)
+                api(`/api/devices/${id}`),
+                api(`/api/history?deviceId=${id}`)
             ]);
             selectedDeviceId = device.id;
-            document.getElementById("detail-name").textContent = device.name;
-            document.getElementById("detail-ip").textContent = device.ip;
-            document.getElementById("detail-type").textContent = deviceTypeLabels[device.type] || "Outro";
-            const check = device.lastCheck;
-            const statusTarget = document.getElementById("detail-status");
-            statusTarget.replaceChildren(statusBadge(check?.status));
-            document.getElementById("detail-latency").textContent = formatLatency(check?.latencyMs);
-            document.getElementById("detail-loss").textContent = check?.packetLossPercent === null || check?.packetLossPercent === undefined
-                ? "—"
-                : `${check.packetLossPercent}%`;
-            document.getElementById("detail-last-check").textContent = formatDate(check?.checkedAt);
-            showMessage(
-                document.getElementById("detail-message"),
-                check?.status === "error" ? check.message : ""
-            );
-            const count = renderHistory(checks.slice(0, 50), "detail-history-rows", "detail-history-empty");
+            const check = normalizeCheck(device.lastCheck);
+
+            $("detail-name").textContent = device.name;
+            $("detail-ip").textContent = device.ip;
+            $("detail-type").textContent = deviceTypeLabels[device.type] || "Outro";
+            $("detail-status").replaceChildren(statusBadge(check?.status));
+            $("detail-latency").textContent = formatLatency(check?.latencyMs);
+            $("detail-loss").textContent = formatLoss(check?.packetLossPercent);
+            $("detail-last-check").textContent = formatDate(check?.checkedAt);
+            showMessage(detailMessage, check?.status === "error" ? check.message : "");
+
+            renderHistory(checks.slice(0, 50), "detail-history-rows", "detail-history-empty");
             renderLatencyChart(checks);
-            if (!count) document.getElementById("detail-history-empty").hidden = false;
         } catch (error) {
-            showMessage(document.getElementById("detail-message"), error.message, true);
+            showMessage(detailMessage, error.message, true);
         }
     }
 
-    async function switchView(name) {
+    function showView(name) {
         currentView = name;
-        Object.entries(viewElements).forEach(([viewName, view]) => {
-            view.hidden = viewName !== name;
-        });
+        Object.entries(views).forEach(([viewName, view]) => { view.hidden = viewName !== name; });
         document.querySelectorAll(".nav-button").forEach((button) => {
             button.classList.toggle("is-active", button.dataset.view === name);
         });
-        const titles = {
-            dashboard: "Dashboard",
-            devices: "Dispositivos",
-            problems: "Problemas",
-            history: "Histórico",
-            deviceDetail: "Detalhes do dispositivo"
-        };
-        document.getElementById("page-title").textContent = titles[name];
+        $("page-title").textContent = viewTitles[name];
+    }
+
+    async function switchView(name) {
+        showView(name);
         if (!currentUser) {
             showMessage(authMessage, "Entre na sua conta para acessar o monitoramento.", true);
             return;
@@ -309,95 +377,76 @@ document.addEventListener("DOMContentLoaded", () => {
         else await loadDashboard();
     }
 
-    async function openDevice(deviceId) {
-        selectedDeviceId = deviceId;
-        await switchView("deviceDetail");
+    function renderAccount() {
+        $("account-logged-out").hidden = Boolean(currentUser);
+        $("account-logged-in").hidden = !currentUser;
+
+        if (currentUser) {
+            $("account-name").textContent = currentUser.name;
+            $("account-email").textContent = currentUser.email;
+            void loadDashboard();
+            return;
+        }
+        // Sem usuário: volta ao dashboard vazio
+        showView("dashboard");
+        renderDashboard({
+            summary: { online: 0, offline: 0, highLatency: 0, lastCheckAt: null },
+            devices: [],
+            problems: []
+        });
     }
 
-    function renderAccount() {
-        accountLoggedOut.hidden = Boolean(currentUser);
-        accountLoggedIn.hidden = !currentUser;
-        if (currentUser) {
-            document.getElementById("account-name").textContent = currentUser.name;
-            document.getElementById("account-email").textContent = currentUser.email;
-            void loadDashboard();
-        } else {
-            currentView = "dashboard";
-            Object.entries(viewElements).forEach(([viewName, view]) => {
-                view.hidden = viewName !== "dashboard";
-            });
-            document.querySelectorAll(".nav-button").forEach((button) => {
-                button.classList.toggle("is-active", button.dataset.view === "dashboard");
-            });
-            document.getElementById("page-title").textContent = "Dashboard";
-            document.getElementById("online-count").textContent = "0";
-            document.getElementById("offline-count").textContent = "0";
-            document.getElementById("latency-count").textContent = "0";
-            document.getElementById("dashboard-last-check").textContent = "Aguardando dados";
-            renderDashboard({
-                summary: { online: 0, offline: 0, highLatency: 0, lastCheckAt: null },
-                devices: [],
-                problems: []
-            });
+    async function authenticate(path, form, successMessage) {
+        const formData = new FormData(form);
+        try {
+            currentUser = saveSession(await api(path, {
+                method: "POST",
+                body: JSON.stringify(Object.fromEntries(formData))
+            }));
+            form.reset();
+            showMessage(authMessage, successMessage);
+            renderAccount();
+        } catch (error) {
+            showMessage(authMessage, error.message, true);
         }
     }
 
-    document.querySelectorAll(".nav-button, [data-view]").forEach((button) => {
-        button.addEventListener("click", () => {
-            if (button.dataset.view) void switchView(button.dataset.view);
-        });
+    // ---- Eventos ----
+
+    document.querySelectorAll("[data-view]").forEach((button) => {
+        button.addEventListener("click", () => void switchView(button.dataset.view));
     });
 
-    authToggle.addEventListener("click", () => {
+    // Cards de dispositivo e botões "Detalhes" abrem a tela de detalhe
+    document.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-device-id]");
+        if (!button) return;
+        selectedDeviceId = button.dataset.deviceId;
+        void switchView("deviceDetail");
+    });
+
+    $("auth-toggle").addEventListener("click", () => {
         isRegistering = !isRegistering;
         loginForm.hidden = isRegistering;
         registerForm.hidden = !isRegistering;
-        authToggle.textContent = isRegistering ? "Já tenho uma conta" : "Criar uma conta";
+        $("auth-toggle").textContent = isRegistering ? "Já tenho uma conta" : "Criar uma conta";
         showMessage(authMessage, "");
     });
 
-    loginForm.addEventListener("submit", async (event) => {
+    loginForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        const formData = new FormData(loginForm);
-        try {
-            currentUser = await api("/api/auth/login", {
-                method: "POST",
-                body: JSON.stringify({
-                    email: formData.get("email"),
-                    password: formData.get("password")
-                })
-            });
-            loginForm.reset();
-            showMessage(authMessage, "Login realizado.");
-            renderAccount();
-        } catch (error) {
-            showMessage(authMessage, error.message, true);
-        }
+        void authenticate("/api/auth/login", loginForm, "Login realizado.");
     });
 
-    registerForm.addEventListener("submit", async (event) => {
+    registerForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        const formData = new FormData(registerForm);
-        try {
-            currentUser = await api("/api/auth/register", {
-                method: "POST",
-                body: JSON.stringify({
-                    name: formData.get("name"),
-                    email: formData.get("email"),
-                    password: formData.get("password")
-                })
-            });
-            registerForm.reset();
-            showMessage(authMessage, "Conta criada e login realizado.");
-            renderAccount();
-        } catch (error) {
-            showMessage(authMessage, error.message, true);
-        }
+        void authenticate("/api/auth/register", registerForm, "Conta criada e login realizado.");
     });
 
-    document.getElementById("logout-button").addEventListener("click", async () => {
+    $("logout-button").addEventListener("click", async () => {
         try {
             await api("/api/auth/logout", { method: "POST", body: "{}" });
+            clearToken();
             currentUser = null;
             selectedDeviceId = null;
             showMessage(authMessage, "Você saiu da conta.");
@@ -416,16 +465,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const button = deviceForm.querySelector("button[type=submit]");
         button.disabled = true;
         showMessage(deviceFormMessage, "Cadastrando e executando o primeiro ping…");
-        const formData = new FormData(deviceForm);
+        const { name, ip, type } = Object.fromEntries(new FormData(deviceForm));
         try {
-            await api("/api/devices", {
-                method: "POST",
-                body: JSON.stringify({
-                    name: formData.get("name"),
-                    ip: formData.get("ip"),
-                    type: formData.get("type")
-                })
-            });
+            await api("/api/devices", { method: "POST", body: JSON.stringify({ name, ip, type }) });
             deviceForm.reset();
             showMessage(deviceFormMessage, "Dispositivo cadastrado. A primeira verificação foi registrada.");
             await loadDashboard();
@@ -436,55 +478,71 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    document.addEventListener("click", (event) => {
-        const deviceButton = event.target.closest("[data-device-id]");
-        if (!deviceButton) return;
-        void openDevice(deviceButton.dataset.deviceId);
-    });
+    $("back-to-devices").addEventListener("click", () => void switchView("devices"));
 
-    document.getElementById("back-to-devices").addEventListener("click", () => {
-        void switchView("devices");
-    });
-
-    document.getElementById("check-now-button").addEventListener("click", async (event) => {
+    $("check-now-button").addEventListener("click", async (event) => {
         if (!selectedDeviceId) return;
         const button = event.currentTarget;
         button.disabled = true;
-        showMessage(document.getElementById("detail-message"), "Executando ping…");
+        showMessage(detailMessage, "Executando ping…");
         try {
-            await api(`/api/devices/${encodeURIComponent(selectedDeviceId)}/check`, {
-                method: "POST",
-                body: "{}"
-            });
+            await api(`/api/devices/${encodeURIComponent(selectedDeviceId)}/check`, { method: "POST", body: "{}" });
             await Promise.all([loadDeviceDetail(selectedDeviceId), loadDashboard()]);
-            showMessage(document.getElementById("detail-message"), "Verificação registrada.");
+            showMessage(detailMessage, "Verificação registrada.");
         } catch (error) {
-            showMessage(document.getElementById("detail-message"), error.message, true);
+            showMessage(detailMessage, error.message, true);
         } finally {
             button.disabled = false;
         }
     });
 
-    document.getElementById("delete-device-button").addEventListener("click", async () => {
+    $("edit-device-button").addEventListener("click", async () => {
+        if (!selectedDeviceId) return;
+        const url = `/api/devices/${encodeURIComponent(selectedDeviceId)}`;
+        try {
+            const current = await api(url);
+            const name = prompt("Nome do dispositivo:", current.name);
+            if (name === null) return;
+            const ip = prompt("Endereço IPv4 privado:", current.ip);
+            if (ip === null) return;
+            const type = prompt("Tipo (computador, servidor, roteador, switch, outro):", current.type);
+            if (type === null) return;
+            await api(url, { method: "PUT", body: JSON.stringify({ name, ip, type }) });
+            await loadDeviceDetail(selectedDeviceId);
+            showMessage(detailMessage, "Dispositivo atualizado.");
+        } catch (error) {
+            showMessage(detailMessage, error.message, true);
+        }
+    });
+
+    $("delete-device-button").addEventListener("click", async () => {
         if (!selectedDeviceId || !confirm("Excluir este dispositivo? O histórico já registrado será preservado.")) return;
         try {
             await api(`/api/devices/${encodeURIComponent(selectedDeviceId)}`, { method: "DELETE" });
             selectedDeviceId = null;
             await switchView("devices");
         } catch (error) {
-            showMessage(document.getElementById("detail-message"), error.message, true);
+            showMessage(detailMessage, error.message, true);
         }
     });
 
-    api("/api/auth/session")
+    // ---- Inicialização ----
+
+    (authToken ? api("/api/auth/session") : Promise.resolve(null))
         .then((user) => {
             currentUser = user;
             renderAccount();
         })
-        .catch((error) => showMessage(authMessage, error.message, true));
+        .catch((error) => {
+            clearToken();
+            currentUser = null;
+            renderAccount();
+            showMessage(authMessage, error.message, true);
+        });
 
+    // Atualiza a tela atual a cada 15 s (pausa com a aba em segundo plano)
     setInterval(() => {
-        if (!currentUser) return;
+        if (!currentUser || document.hidden) return;
         void loadDashboard();
         if (currentView === "history") void loadHistory();
         if (currentView === "deviceDetail" && selectedDeviceId) void loadDeviceDetail(selectedDeviceId);
