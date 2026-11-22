@@ -14,7 +14,7 @@ export const CheckModel = {
   },
   history(userId: number, deviceId?: number) {
     return deviceId
-      ? db.prepare("SELECT * FROM checks WHERE user_id = ? AND device_id = ? ORDER BY id DESC LIMIT 500").all(userId, deviceId)
-      : db.prepare("SELECT * FROM checks WHERE user_id = ? ORDER BY id DESC LIMIT 500").all(userId);
+      ? db.prepare("SELECT device_id AS deviceId, device_name AS deviceName, ip, checked_at AS checkedAt, status, latency_ms AS latencyMs, packet_loss_percent AS packetLossPercent, message FROM checks WHERE user_id = ? AND device_id = ? ORDER BY id DESC LIMIT 500").all(userId, deviceId)
+      : db.prepare("SELECT device_id AS deviceId, device_name AS deviceName, ip, checked_at AS checkedAt, status, latency_ms AS latencyMs, packet_loss_percent AS packetLossPercent, message FROM checks WHERE user_id = ? ORDER BY id DESC LIMIT 500").all(userId);
   }
 };
