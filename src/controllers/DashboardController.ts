@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthRequest } from "../types";
 import { DeviceModel } from "../models/Device";
 import { CheckModel } from "../models/Check";
+import { ApiError } from "../utils/errors";
 
 export const DashboardController = {
   dashboard(req: AuthRequest, res: Response) {
@@ -24,7 +25,10 @@ export const DashboardController = {
     res.json(devices.filter(d => ["offline", "high_latency", "error"].includes(d.lastCheck?.status)));
   },
   history(req: AuthRequest, res: Response) {
-    const id = req.query.deviceId ? Number(req.query.deviceId) : undefined;
+    const rawId = req.query.deviceId;
+    if (rawId !== undefined && (typeof rawId !== "string" || !/^\d+$/.test(rawId) || !Number.isSafeInteger(Number(rawId)) || Number(rawId) < 1))
+      throw new ApiError(400, "deviceId inválido.");
+    const id = rawId === undefined ? undefined : Number(rawId);
     res.json(CheckModel.history(req.user!.id, id));
   }
 };
