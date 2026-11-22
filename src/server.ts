@@ -1,33 +1,41 @@
 import express from "express";
-import session from "express-session";
 import path from "node:path";
 import cron from "node-cron";
-import db from "./database";
+import { config } from "./config";
+import "./database";
 import api from "./routes";
 import { DeviceModel } from "./models/Device";
 import { CheckModel } from "./models/Check";
 import { ping } from "./services/monitoring";
+import { errorHandler, notFound } from "./utils/errors";
 
 const app = express();
-app.use(express.json());
-app.use(session({
-  secret: process.env.SESSION_SECRET || "troque-este-segredo-em-producao",
-  resave: false, saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 }
-}));
+app.disable("x-powered-by");
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
+app.use(express.json({ limit: "16kb" }));
 app.use("/api", api);
-app.use(express.static(path.join(process.cwd(), "public")));
-
+app.use(express.static(path.resolve(process.cwd(), "public")));
+app.use(notFound);
+app.use(errorHandler);
+let running = false;
 async function monitor() {
-  const devices = db.prepare("SELECT * FROM devices").all() as any[];
-  for (const device of devices) {
-    try { CheckModel.create(device, await ping(device.ip)); }
-    catch (e) {
-      CheckModel.create(device, { status: "error", latencyMs: null, packetLossPercent: 100,
-        message: e instanceof Error ? e.message : "Erro no ping" });
+  if (running) return;
+  running = true;
+  try {
+    for (const d of DeviceModel.allForMonitor()) {
+      try { CheckModel.create(d, await ping(d.ip)); }
+      catch (e) {
+        CheckModel.create(d, { status: "error", latencyMs: null, packetLossPercent: 100,
+          message: e instanceof Error ? e.message.slice(0, 200) : "Erro no ping" });
+      }
     }
-  }
+  } finally { running = false; }
 }
-cron.schedule("* * * * *", () => void monitor());
-
-app.listen(3000, () => console.log("PING.COM em http://localhost:3000"));
+if (!cron.validate(config.monitorCron)) throw new Error("MONITOR_CRON inválido no .env");
+cron.schedule(config.monitorCron, () => void monitor().catch(console.error));
+app.listen(config.port, () => console.log(`PING.COM em http://localhost:${config.port}`));
