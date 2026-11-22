@@ -6,7 +6,7 @@
 > Projeto desenvolvido na disciplina de Desenvolvimento Web, com
 > finalidade educacional.
 
-## Sobre o projeto
+## Sobre o projeto:
 
 O **PING.COM** é uma aplicação web para cadastrar dispositivos de uma
 rede e acompanhar sua disponibilidade, latência e perda de pacotes.
