@@ -1,37 +1,27 @@
 import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+import { config } from "./config";
 
-const db = new Database("pingcom.db");
+fs.mkdirSync(path.dirname(config.databasePath), { recursive: true });
+const db = new Database(config.databasePath);
 db.pragma("foreign_keys = ON");
+db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS devices (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    ip TEXT NOT NULL,
-    type TEXT NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS checks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    device_name TEXT NOT NULL,
-    ip TEXT NOT NULL,
-    checked_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    latency_ms REAL,
-    packet_loss_percent REAL,
-    message TEXT,
-    FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
+// Migrations SQL executadas sequencialmente, cada uma numa transação atômica.
+db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+const dir = path.resolve(__dirname, "migrations");
+// No build: dist/migrations; no dev com tsx: src/migrations.
+const migrationDir = fs.existsSync(dir) ? dir : path.resolve(process.cwd(), "src/migrations");
+for (const name of fs.readdirSync(migrationDir).filter(n => /^\d+_.*\.sql$/.test(n)).sort()) {
+  const applied = db.prepare("SELECT 1 FROM schema_migrations WHERE filename = ?").get(name);
+  if (applied) continue;
+  const sql = fs.readFileSync(path.join(migrationDir, name), "utf8");
+  db.transaction(() => {
+    db.exec(sql);
+    db.prepare("INSERT INTO schema_migrations(filename, applied_at) VALUES (?, ?)").run(name, new Date().toISOString());
+  })();
+  console.log("Migration executada:", name);
+}
 export default db;
